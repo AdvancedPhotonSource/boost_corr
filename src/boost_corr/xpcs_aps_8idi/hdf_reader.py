@@ -1,5 +1,4 @@
 import h5py
-import hdf5plugin
 import numpy as np
 import logging
 import traceback
@@ -21,7 +20,7 @@ def put_results_in_hdf5(save_path, result, compression=None):
     result : dict
         Dictionary of results to save
     compression : str, optional
-        Compression method to use. If None, large arrays use zstd compression
+        Compression method to use. If None, large arrays use lzf compression
 
     Returns
     -------
@@ -40,8 +39,8 @@ def put_results_in_hdf5(save_path, result, compression=None):
             else:
                 chunks = data.shape
             return f.create_dataset(path, data=data,
-                                    chunks=chunks,
-                                    **hdf5plugin.Zstd(clevel=9))
+                                    compression='lzf',
+                                    chunks=chunks)
         return f.create_dataset(path, data=data, compression=compression)
 
     def save_dict_to_group(group, dictionary):
