@@ -4,6 +4,7 @@ import torch
 from .xpcs_dataset import XpcsDataset
 from timepix_dataset.dataset import TimepixRawDataset
 from ...devices import is_gpu_device
+import boost_corr.xpcs_aps_8idi.exceptions as exc
 
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,9 @@ class TimepixAnalysisDataset(XpcsDataset):
         device="cpu",
         **kwargs,
     ):
-        super(TimepixAnalysisDataset, self).__init__(*args, dtype=dtype, device=device, **kwargs)
+        super(TimepixAnalysisDataset, self).__init__(
+            *args, dtype=dtype, device=device, **kwargs
+        )
         self.dataset_type = "Timepix4Dataset"
         self.is_sparse = True
         self.dtype = np.uint8
@@ -120,9 +123,33 @@ class TimepixAnalysisDataset(XpcsDataset):
                 layout = self.raw_dataset.layout[module_index]
                 canvas[:actual_batch_size, :, layout] = _data
 
+            # print(canvas.shape) # canvas is 3d
+            canvas = self.update_signal_spill(canvas)
             canvas = canvas[0:actual_batch_size].view(actual_batch_size, self.pixel_num)
 
         if self.mask_crop is not None:
             canvas = canvas[:, self.mask_crop]
 
         return canvas
+
+    def get_events(self):
+        """Return (pixel, time_bin, count, bin_width_ns) for the event
+        correlator. Only single-chip (num_chips == 1) datasets are
+        supported in this version: multi-chip datasets need each module's
+        pixel index remapped through raw_dataset.layout, which is not yet
+        implemented (see docs/superpowers/specs/2026-09-17-event-correlator-
+        integration-design.md, Risks section).
+        """
+        if self.raw_dataset.num_chips != 1:
+            raise exc.DatasetError(
+                "get_events() is only supported for single-chip Timepix4 "
+                f"datasets (this dataset has {self.raw_dataset.num_chips} "
+                "chips); use --signal-spill none to run multitau/twotime "
+                "instead."
+            )
+        index, frame, count = self.ifc_list[0]
+        pixel = index.detach().cpu().numpy().astype(np.int64)
+        time_bin = frame.detach().cpu().numpy().astype(np.int64)
+        count = count.detach().cpu().numpy().astype(np.int64)
+        bin_width_ns = self.bin_time_s * 1e9
+        return pixel, time_bin, count, bin_width_ns
