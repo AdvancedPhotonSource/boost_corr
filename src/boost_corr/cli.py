@@ -94,6 +94,7 @@ default_config = {
     "crop_ratio_threshold": 0.5,  # Threshold for masking
     "max_memory": 36.0,  # Max memory usage in GB
     "num_segments": 1,
+    "signal_spill": None,
     "pbs_queue": "XpcsLowQ",
     "pbs_batch_size": 32,
     "pbs_gpus": 4,
@@ -221,6 +222,14 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--signal-spill",
+    type=str,
+    choices=["none", "v", "h", "vh", None],
+    default=default_config["signal_spill"],
+    help="Count for signal spillover: 'none', 'v' [vertical direction], 'h' [horizontal direction], 'vh' [both directions], or None. [default: %(default)s]",
+)
+
+parser.add_argument(
     "--version",
     action="version",
     version=f"boost_corr {__version__}",
@@ -323,7 +332,15 @@ parser.add_argument(
     "--pbs-queue",
     type=str,
     default=default_config["pbs_queue"],
-    choices=["XpcsPreemptQ", "XpcsLowQ", "XpcsHighQ", "CssiPreemptQ", "CssiLowQ", "CssiHighQ", "inference"],
+    choices=[
+        "XpcsPreemptQ",
+        "XpcsLowQ",
+        "XpcsHighQ",
+        "CssiPreemptQ",
+        "CssiLowQ",
+        "CssiHighQ",
+        "inference",
+    ],
     help="PBS queue for job submission (only used with --gpu-id -3). [default: %(default)s]",
 )
 

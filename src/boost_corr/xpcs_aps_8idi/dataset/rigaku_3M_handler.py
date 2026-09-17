@@ -48,6 +48,10 @@ class Rigaku3MDataset(XpcsDataset):
         total_frames = max(total_frames)
 
         kwargs.pop("mask_crop", None)
+        # spill correction is applied once on the stitched 6-module canvas in
+        # Rigaku3MDataset.__getbatch__; skip it on the individual modules here
+        # to avoid double-counting.
+        kwargs["signal_spill"] = "none"
         return [
             RigakuDataset(
                 f, dtype=dtype, mask_crop=None, total_frames=total_frames, **kwargs
@@ -87,17 +91,9 @@ class Rigaku3MDataset(XpcsDataset):
             temp = module.__getbatch__(idx)
             canvas = self.append_data(canvas, index, temp)
 
+        canvas = self.update_signal_spill(canvas)
         canvas = canvas.reshape(size, -1)
         if self.mask_crop is not None:
             canvas = canvas[:, self.mask_crop]
 
         return canvas
-
-
-def test():
-    fname = "../../../tests/data/verify_circular_correlation/F091_D100_Capillary_Post_att00_Lq0_Rq0_00001/F091_D100_Capillary_Post_att00_Lq0_Rq0_00001.bin"
-    ds = RigakuDataset(fname)
-
-
-if __name__ == "__main__":
-    test()

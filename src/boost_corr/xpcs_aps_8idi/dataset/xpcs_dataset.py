@@ -31,8 +31,9 @@ class XpcsDataset(object):
         use_loader=False,
         dtype=np.uint8,
         mask_crop=None,
-        bin_time_s=1,  # bin time in seconds, placeholder for non-timepix detectors 
-        run_config_path=None,      # run config path, placeholder for non-timepix detectors
+        signal_spill="h",
+        bin_time_s=1,  # bin time in seconds, placeholder for non-timepix detectors
+        run_config_path=None,  # run config path, placeholder for non-timepix detectors
     ):
         self.fname = fname
         self.raw_size = os.path.getsize(fname) / (1024**2)
@@ -53,11 +54,27 @@ class XpcsDataset(object):
         self.avg_frame = avg_frame
         self.stride = stride_frame
 
+        assert signal_spill in ("none", "v", "h", "vh", None), (
+            "signal_spill must be 'none', 'v', 'h', 'vh', or None"
+        )
+        self.signal_spill = signal_spill
+
         self.use_loader = use_loader
         self.dtype = dtype
         self.dataset_type = None
         self.dtype_raw = None
         self.bin_time_s = bin_time_s
+
+    def update_signal_spill(self, x):
+        if self.signal_spill in ("none", None):
+            return x
+        elif self.signal_spill == "v":
+            return x + torch.roll(x, 1, dims=1) + torch.roll(x, -1, dims=1)
+        elif self.signal_spill == "h":
+            return x + torch.roll(x, 1, dims=2) + torch.roll(x, -1, dims=2)
+        elif self.signal_spill == "vh":
+            return x + torch.roll(x, 1, dims=1) + torch.roll(x, 1, dims=2) + \
+                   torch.roll(x, -1, dims=1) + torch.roll(x, -1, dims=2)
 
     def update_batch_info(self, frame_num: int) -> None:
         """

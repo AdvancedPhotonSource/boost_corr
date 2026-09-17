@@ -31,6 +31,37 @@ def convert_sparse(a):
     return output
 
 
+# RigakuExtend sparse data format (64-bit per event)
+# Bits 0-11:  Photon Count (12 bits)
+# Bits 12-31: Pixel Index  (20 bits)
+# Bits 32-63: Frame Index  (32 bits)
+RIGAKU_EXTEND_COUNT_MASK = 0xFFF       # (2 ** 12 - 1)
+RIGAKU_EXTEND_PIXEL_SHIFT = 12
+RIGAKU_EXTEND_PIXEL_MASK = 0xFFFFF     # (2 ** 20 - 1)
+RIGAKU_EXTEND_FRAME_SHIFT = 32
+RIGAKU_EXTEND_WORD_SIZE = 8
+
+
+def convert_sparse_extend(a):
+    """
+    convert sparse data from RigakuExtend 64bit binary format to 3xN format
+    Args:
+        a: 1D array of uint64
+    Returns:
+        3xN array of uint32, where N is the number of pixels
+    """
+    output = np.zeros(shape=(3, a.size), dtype=np.uint32)
+    # index of pixels in the detector
+    output[0] = (
+        (a >> RIGAKU_EXTEND_PIXEL_SHIFT) & RIGAKU_EXTEND_PIXEL_MASK
+    ).astype(np.uint32)
+    # index of frame
+    output[1] = (a >> RIGAKU_EXTEND_FRAME_SHIFT).astype(np.uint32)
+    # photon count
+    output[2] = (a & RIGAKU_EXTEND_COUNT_MASK).astype(np.uint8)
+    return output
+
+
 def get_number_of_frames_from_binfile(filepath, endianness='<'):
     """
     Reads the last 8 bytes of a Rigaku binary file and extracts the frame count.
