@@ -226,7 +226,7 @@ parser.add_argument(
     type=str,
     choices=["none", "v", "h", "vh", None],
     default=default_config["signal_spill"],
-    help="Count for signal spillover: 'none', 'v' [vertical direction], 'h' [horizontal direction], 'vh' [both directions], or None. [default: %(default)s]",
+    help="Count for signal spillover: 'none', 'v' [vertical direction], 'h' [horizontal direction], 'vh' [both directions], or None. Any value other than 'none' also switches the correlator to the event-driven engine (ACF+CCF from photon arrival times) instead of Multitau/Twotime, and selects the CCF neighbour direction; incompatible with --type Twotime/Both, and with frame segmentation/cropping (--num-segments/--begin-frame/--end-frame/--avg-frame/--stride-frame). [default: %(default)s]",
 )
 
 parser.add_argument(

@@ -442,6 +442,32 @@ def solve_correlation(
         )
     if use_event:
         analysis_type = "Event"
+        # EventCorrelator consumes dset.get_events(), which always returns the
+        # whole file: none of the frame segmentation/cropping knobs are applied
+        # anywhere on this path. Silently ignoring them produced e.g.
+        # --num-segments 2 -> two byte-identical full-file outputs, so reject
+        # them up front instead.
+        _non_default = []
+        if num_segments != 1:
+            _non_default.append(f"num_segments={num_segments!r}")
+        if begin_frame != 0:
+            _non_default.append(f"begin_frame={begin_frame!r}")
+        if end_frame != -1:
+            _non_default.append(f"end_frame={end_frame!r}")
+        if avg_frame != 1:
+            _non_default.append(f"avg_frame={avg_frame!r}")
+        if stride_frame != 1:
+            _non_default.append(f"stride_frame={stride_frame!r}")
+        if _non_default:
+            raise exc.ConfigurationError(
+                "The event correlator (--signal-spill != none) does not support "
+                f"frame segmentation/cropping, but got: {', '.join(_non_default)}. "
+                "Event-mode datasets always use the entire file; remove these flags "
+                "or use --signal-spill none for multitau/twotime."
+            )
+        # analysis_kwargs below is built from locals() and is written verbatim
+        # to /xpcs/event/config; drop the scratch list so it does not leak in.
+        del _non_default
 
     if analysis_type not in _VALID_TYPES:
         raise ValueError(

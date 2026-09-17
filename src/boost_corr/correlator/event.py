@@ -69,7 +69,12 @@ class EventCorrelator:
                 "direction; expected 'h', 'v', or 'vh'."
             )
         directions = _DIRECTIONS_BY_SIGNAL_SPILL[signal_spill]
-        ring_map = qpm.dqmap.astype(np.int64) - 1
+        # restrict every dq ring to masked-in pixels, matching what the dense
+        # multitau path does (xpcs_qpartitionmap.compute_g2 correlates only
+        # dqmap.reshape(-1)[mask_idx_1d]). Nothing zeroes qpm.dqmap outside
+        # qpm.mask, so without this a blemished/dead pixel that still carries a
+        # nonzero dq label would silently enter the ACF/CCF pixel-pair lists.
+        ring_map = np.where(qpm.mask, qpm.dqmap, 0).astype(np.int64) - 1
         return cls(ring_map, directions, device=device,
                    per_decade=kwargs.get("per_decade", 8))
 
@@ -79,19 +84,27 @@ class EventCorrelator:
         self._results = None
 
     def describe(self):
-        n_events = self._table.n_events if self._table is not None else 0
+        # no event count here: common.py::run_jobs calls describe() *before*
+        # process_dataset() builds the table, so it would always log 0.
+        # process_dataset's own verbose branch logs the real count instead.
         logger.info(
             f"event correlator: {self.n_rings} rings, directions={self.directions}"
         )
-        logger.info(f"events loaded: {n_events}")
 
     def process_dataset(self, dset, verbose=False, use_loader=False, num_workers=0):
         pixel, time_bin, count, bin_width_ns = dset.get_events()
         npix = self.det_size[0] * self.det_size[1]
-        toa_ns = time_bin.astype(np.float64) * bin_width_ns
+        # build from the integer time_bin directly (bin_width=1.0) rather than
+        # multiplying into ns and re-quantizing by the same float, which is not
+        # guaranteed to round-trip exactly for non-dyadic bin_width_ns and can
+        # silently misbin events by one time bin. bin_width is attached
+        # afterwards: _event_core only consumes it as a multiplicative scale
+        # factor on `lag`, never to re-derive bin indices.
         self._table = build_event_table(
-            toa_ns, pixel, bin_width_ns, npix, weights=count.astype(np.float64)
+            time_bin.astype(np.float64), pixel, 1.0, npix,
+            weights=count.astype(np.float64),
         )
+        self._table.bin_width = float(bin_width_ns)
         self._device_table = upload_table(self._table, self.device)
         if verbose:
             logger.info(
@@ -100,6 +113,13 @@ class EventCorrelator:
             )
 
     def post_process(self, **kwargs):
+        if self.n_rings == 0:
+            # np.stack([]) below would raise a bare ValueError; fail with a
+            # message that says what is actually wrong with the qmap.
+            raise exc.ConfigurationError(
+                "qmap has no valid dq rings (dynamic_roi_map is entirely masked "
+                "out or zero); the event correlator needs at least one ring."
+            )
         table = self._table
         lag_max = max(table.n_bins // 2, 1)
         edges_acf = log_lag_edges(1, lag_max, self.per_decade)
@@ -178,12 +198,20 @@ class EventCorrelator:
         results = self._results
         if not skip_scattering:
             n_frames = max(table.n_bins, 1)
-            saxs_2d = torch.as_tensor(results["saxs_2d"] / n_frames, dtype=torch.float32)
+            # device= is mandatory: qpm.normalize_scattering ->
+            # average_with_index_map runs torch.bincount against qmap tensors
+            # living on self.device, and mixing a CPU tensor in raises
+            # RuntimeError (surfaced as PostProcessingError) on every GPU run.
+            saxs_2d = torch.as_tensor(
+                results["saxs_2d"] / n_frames, dtype=torch.float32,
+                device=self.device,
+            )
             output_scattering = {
                 "saxs_2d": saxs_2d,
                 "saxs_2d_par": saxs_2d.unsqueeze(0),
                 "intensity_vs_time": torch.as_tensor(
-                    results["intensity_vs_time"], dtype=torch.float32
+                    results["intensity_vs_time"], dtype=torch.float32,
+                    device=self.device,
                 ),
                 "mask_crop": self.mask_crop,
             }

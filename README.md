@@ -213,6 +213,14 @@ Options:
   -f, --stride-frame    Frame stride for processing [default: 1]
   -a, --avg-frame       Number of frames to average [default: 1]
   -t, --type            Analysis type: Multitau, Twotime, or Both [default: Multitau]
+  --signal-spill        Signal spillover / CCF direction: none, v, h, or vh [default: None].
+                        Any value other than none also switches the correlation engine to the
+                        event correlator (ACF + nearest-neighbour-pixel CCF computed from photon
+                        arrival times) instead of Multitau/Twotime, and the value itself selects
+                        the CCF neighbour direction. Incompatible with --type Twotime/Both, and
+                        with frame segmentation/cropping (--num-segments, -b/--begin-frame,
+                        -e/--end-frame, -a/--avg-frame, -f/--stride-frame), which the event path
+                        does not apply.
   -d, --dq-selection    DQ selection (e.g., "1,2,5-7" or "all") [default: all]
   -v, --verbose         Enable verbose output
   -G, --save-G2         Save G2, IP, and IF to file
