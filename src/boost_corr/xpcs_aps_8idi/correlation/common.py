@@ -11,6 +11,7 @@ import torch
 import boost_corr.xpcs_aps_8idi.exceptions as exc
 from boost_corr import log_timer
 
+from ...correlator.event import EventCorrelator
 from ...correlator.multitau import MultitauCorrelator
 from ...correlator.twotime import TwotimeCorrelator
 from ...devices import get_device
@@ -134,7 +135,9 @@ def save_result(result_kwargs, payloads, label, post_save=None, t_start=None):
                 result_file.append(payload)
             if post_save is not None:
                 post_save(result_file)
-        elapsed = f" in {time.perf_counter() - t_start:.3f}s" if t_start is not None else ""
+        elapsed = (
+            f" in {time.perf_counter() - t_start:.3f}s" if t_start is not None else ""
+        )
         logger.info(f"{label} analysis finished{elapsed}")
         return result_file.fname
     except Exception as e:
@@ -221,7 +224,11 @@ def run_jobs(
                 else None
             )
             fname = save_result(
-                result_kwargs, payloads, label=label, post_save=post_save, t_start=t_job_start
+                result_kwargs,
+                payloads,
+                label=label,
+                post_save=post_save,
+                t_start=t_job_start,
             )
             elapsed = time.perf_counter() - t_job_start
             log_job_status(job_idx, n_jobs, elapsed, f"saved: {fname}")
@@ -310,9 +317,10 @@ def build_jobs(raw, num_segments, begin_frame, suffix, common_dset_kwargs, label
 _CORRELATOR_CLASSES = {
     "Multitau": MultitauCorrelator,
     "Twotime": TwotimeCorrelator,
+    "Event": EventCorrelator,
 }
 
-_VALID_TYPES = ("Multitau", "Twotime", "Both")
+_VALID_TYPES = ("Multitau", "Twotime", "Both", "Event")
 
 
 def _build_run_args(
@@ -368,6 +376,9 @@ def _build_run_args(
         run_opts["correlation_post_kwargs"] = {"smooth_method": smooth}
         run_opts["normalize_opts"] = {"skip_scattering": skip_scattering}
         run_opts["debug_extra_keys"] = ("num_segments",)
+    elif analysis_type == "Event":
+        run_opts["normalize_opts"] = {"skip_scattering": skip_scattering}
+        run_opts["debug_extra_keys"] = ("num_segments",)
 
     return dict(
         qpm=qpm,
@@ -410,6 +421,7 @@ def solve_correlation(
     suffix: Optional[str] = None,
     num_segments: int = 1,
     meta_fname: Optional[str] = None,
+    signal_spill: Optional[str] = None,
     # multitau-specific
     normalize_frame: bool = False,
     save_G2: bool = False,
@@ -422,6 +434,15 @@ def solve_correlation(
     smooth: str = "sqmap",
     **kwargs: Any,
 ) -> None:
+    use_event = signal_spill not in (None, "none")
+    if use_event and analysis_type in ("Twotime", "Both"):
+        raise exc.ConfigurationError(
+            f"--signal-spill={signal_spill!r} requires the event correlator, "
+            f"which does not support two-time analysis (--type={analysis_type!r})."
+        )
+    if use_event:
+        analysis_type = "Event"
+
     if analysis_type not in _VALID_TYPES:
         raise ValueError(
             f"Unknown analysis_type {analysis_type!r}. Expected one of {_VALID_TYPES}"
@@ -482,8 +503,9 @@ def solve_correlation(
             "begin_frame": begin_frame,
             "end_frame": end_frame,
             "stride_frame": stride_frame,
+            "signal_spill": signal_spill,
         }
-        if analysis_type == "Multitau":
+        if analysis_type in ("Multitau", "Event"):
             common_dset_kwargs["bin_time_s"] = bin_time_s
             common_dset_kwargs["run_config_path"] = run_config_path
 
