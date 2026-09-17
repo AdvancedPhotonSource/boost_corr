@@ -109,6 +109,22 @@ class EventCorrelator:
         ccf = {d: {"lag": None, "g2": [], "err": []} for d in self.directions}
 
         for ring in range(self.n_rings):
+            if not (self.ring_map == ring).any():
+                # empty dq bin (a gapped/non-contiguous qmap is a supported
+                # configuration -- xpcs_qpartitionmap.py's own compute_g2()
+                # already skips empty roi_dq bins). auto_pairs/neighbour_pairs
+                # would return zero pairs here and correlate_pairs_torch
+                # would raise on an empty pair list, so fill this row with
+                # NaN instead of crashing the whole job. We must not skip the
+                # row entirely -- that would shift every later ring's array
+                # index out of alignment with its actual dq label.
+                acf_g2.append(np.full(len(edges_acf) - 1, np.nan))
+                acf_err.append(np.full(len(edges_acf) - 1, np.nan))
+                for direction in self.directions:
+                    ccf[direction]["g2"].append(np.full(len(edges_ccf) - 1, np.nan))
+                    ccf[direction]["err"].append(np.full(len(edges_ccf) - 1, np.nan))
+                continue
+
             result = correlate_pairs_torch(
                 table, auto_pairs(self.ring_map, ring), edges_acf,
                 device=self.device, device_table=self._device_table,
