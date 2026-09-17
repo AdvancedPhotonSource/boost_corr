@@ -124,6 +124,7 @@ class XpcsResult:
         overwrite=False,
         multitau_config=None,
         twotime_config=None,
+        event_config=None,
         prefix=None,
         suffix=None,
     ) -> None:
@@ -157,6 +158,7 @@ class XpcsResult:
             "rawdata_path": os.path.abspath(raw_fname),
             "multitau_config": multitau_config or {},
             "twotime_config": twotime_config or {},
+            "event_config": event_config or {},
         }
 
     def __enter__(self):
