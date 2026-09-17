@@ -1,9 +1,47 @@
+import glob
+import logging
 import os
+
 import h5py
+import numpy as np
+
 from .imm_handler import ImmDataset
 from .rigaku_handler import RigakuDataset
 from .rigaku_3M_handler import Rigaku3MDataset
+from .rigaku_extend_handler import RigakuExtendDataset
 from .hdf_handler import HdfDataset
+
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_bin_width_ns(raw_fname: str, bin_time_s: float) -> float:
+    """Resolve the physical time-bin width (ns) for a Rigaku-family sparse
+    file's "frame" field, which has no self-describing bin width.
+
+    Prefers the sibling `*_metadata.hdf`'s
+    `entry/instrument/detector_1/frame_time` (seconds); falls back to
+    `bin_time_s` (also seconds, e.g. from --bin-time-s) if no metadata file
+    or field is found. Logs a warning if both are present and disagree.
+    """
+    fallback_ns = bin_time_s * 1e9
+    meta_dir = os.path.dirname(os.path.abspath(raw_fname))
+    for meta_fname in sorted(glob.glob(os.path.join(meta_dir, "*_metadata.hdf"))):
+        try:
+            with h5py.File(meta_fname, "r") as f:
+                path = "/entry/instrument/detector_1/frame_time"
+                if path not in f:
+                    continue
+                meta_ns = float(f[path][()]) * 1e9
+        except OSError:
+            continue
+        if not np.isclose(meta_ns, fallback_ns, rtol=1e-3):
+            logger.warning(
+                f"bin width mismatch: metadata {meta_fname} says {meta_ns:.3f} ns, "
+                f"--bin-time-s says {fallback_ns:.3f} ns; using metadata value"
+            )
+        return meta_ns
+    return fallback_ns
 
 
 def create_dataset(raw_fname, **kwargs):
@@ -22,6 +60,10 @@ def create_dataset(raw_fname, **kwargs):
         dataset_method = Rigaku3MDataset
         use_loader = False
         batch_size = 256
+    elif ext == ".bix":
+        dataset_method = RigakuExtendDataset
+        use_loader = False
+        batch_size = 1024
     elif ext in [".imm", ".h5", ".hdf", ".hdf5"]:
         # Check if it's an HDF5 file by trying to detect HDF5 format
         # If not HDF5, treat it as IMM format

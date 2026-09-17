@@ -80,9 +80,29 @@ class RigakuDataset(XpcsDataset):
                 sl = self.mem_addr[idx]
                 x[n, self.ifc[0][sl].long()] = self.ifc[2][sl]
         x = x.to(self.device)
+        x = self.update_signal_spill(x.reshape(size, *self.det_size))
+        x = x.reshape(size, self.pixel_num)
         if self.mask_crop is not None:
             x = x[:, self.mask_crop]
         return x
+
+    def get_events(self):
+        """Return (pixel, time_bin, count, bin_width_ns) for the event
+        correlator: int64 numpy arrays over the full (uncropped) pixel
+        space, sorted by time_bin (as stored in self.ifc). Inherited
+        unchanged by RigakuExtendDataset -- it overrides read_data() only,
+        so self.ifc is already built from the correct bit layout by the
+        time this runs.
+        """
+        # imported lazily: dataset/utils.py imports RigakuDataset at module
+        # level, so a top-level import here would be circular.
+        from .utils import resolve_bin_width_ns
+
+        pixel = self.ifc[0].detach().cpu().numpy().astype(np.int64)
+        time_bin = self.ifc[1].detach().cpu().numpy().astype(np.int64)
+        count = self.ifc[2].detach().cpu().numpy().astype(np.int64)
+        bin_width_ns = resolve_bin_width_ns(self.fname, self.bin_time_s)
+        return pixel, time_bin, count, bin_width_ns
 
 
 def test():
