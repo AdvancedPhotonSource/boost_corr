@@ -3,11 +3,17 @@
 instance (bypassing __init__, which needs the external timepix_dataset
 package and a real file) and sets only the attributes get_events() reads,
 so this test has no dependency on real Timepix4 hardware files."""
+import sys
 import unittest
 from unittest.mock import MagicMock
 
 import numpy as np
 import torch
+
+# Mock timepix_dataset module only for this test file, scoped narrowly
+# to avoid affecting other tests or future real uses of the module.
+sys.modules['timepix_dataset'] = MagicMock()
+sys.modules['timepix_dataset.dataset'] = MagicMock()
 
 from boost_corr.xpcs_aps_8idi.dataset.timepix4_handler import TimepixAnalysisDataset
 from boost_corr.xpcs_aps_8idi.exceptions import DatasetError
