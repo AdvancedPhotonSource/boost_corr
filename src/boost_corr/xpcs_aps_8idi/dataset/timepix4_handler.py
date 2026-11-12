@@ -24,6 +24,11 @@ class TimepixAnalysisDataset(XpcsDataset):
         super(TimepixAnalysisDataset, self).__init__(
             *args, dtype=dtype, device=device, **kwargs
         )
+        # base class's default (1 second) would otherwise silently win: this
+        # subclass declares bin_time_s as its own explicit kwarg (needed
+        # below, for read_data), so it never reaches **kwargs and never
+        # reaches super().__init__() above.
+        self.bin_time_s = bin_time_s
         self.dataset_type = "Timepix4Dataset"
         self.is_sparse = True
         self.dtype = np.uint8
