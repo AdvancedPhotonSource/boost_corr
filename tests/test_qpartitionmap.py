@@ -357,5 +357,39 @@ class TestCheckFixQmap(QMapTestCase):
             qpm.check_fix_qmap()
 
 
+class TestLoad(QMapTestCase):
+    def test_attributes(self):
+        dqmap, sqmap, mask = make_maps()
+        mask[:, :20] = 0
+        qpm = XpcsQPartitionMap(self.write_qmap(dqmap, sqmap, mask))
+        self.assertEqual(qpm.det_size, DET_SIZE)
+        self.assertEqual((qpm.dq_dim, qpm.sq_dim), (5, 20))
+        self.assertIs(type(qpm.dq_dim), int)
+        self.assertEqual(qpm.masked_pixels, int(mask.sum()))
+        self.assertAlmostEqual(qpm.masked_ratio, mask.mean())
+        # older qmap files have no blemish
+        np.testing.assert_array_equal(qpm.blemish, mask.astype(bool))
+        with self.assertLogs("boost_corr", level="INFO") as log:
+            qpm.describe()
+        self.assertIn("dq_map length: 5", log.output[-1])
+
+    def test_blemish(self):
+        dqmap, sqmap, mask = make_maps()
+        fname = self.write_qmap(dqmap, sqmap, mask)
+        blemish = np.ones(DET_SIZE, dtype=np.uint32)
+        blemish[3, 4] = 0
+        with h5py.File(fname, "a") as f:
+            f["/qmap/blemish"] = blemish
+        qpm = XpcsQPartitionMap(fname)
+        np.testing.assert_array_equal(qpm.blemish, blemish.astype(bool))
+
+    def test_file_without_the_maps(self):
+        fname = os.path.join(self.tmpdir, "not_a_qmap.h5")
+        with h5py.File(fname, "w") as f:
+            f["/qmap/mask"] = np.ones(DET_SIZE, dtype=np.uint32)
+        with self.assertRaisesRegex(KeyError, "dynamic_roi_map"):
+            XpcsQPartitionMap(fname)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -248,7 +248,8 @@ class XpcsQPartitionMap(object):
             f"{self.masked_ratio * 100:.4f}%"
         )
         # omit dq = 0 which is not used
-        logger.info(f"dq_map length: {np.unique(self.dqmap).size - 1}")
+        dq_num = np.count_nonzero(np.bincount(self.dqmap.ravel())[1:])
+        logger.info(f"dq_map length: {dq_num}")
 
     def load(self, flag_fix=False):
         values = {}
@@ -256,24 +257,27 @@ class XpcsQPartitionMap(object):
             for key, real_key in key_map.items():
                 if real_key in f:
                     values[key] = np.squeeze(f[real_key][()])
-            # for backward compatibility; older qmap files do not have blemish
-            if "blemish" not in values:
-                values["blemish"] = np.copy(values["mask"])
-                logger.info("no blemish data is available, using mask instead")
-            else:
-                logger.info("blemish data is read from qmap successfully")
 
-        self.__dict__.update(values)
-        self.mask = self.mask.astype(bool)
-        self.blemish = self.blemish.astype(bool)
-        self.dqmap = self.dqmap.astype(np.int32)
-        self.sqmap = self.sqmap.astype(np.int32)
+        missing = [key_map[k] for k in ("dqmap", "sqmap", "mask") if k not in values]
+        if missing:
+            raise KeyError(f"{missing} not found in qmap file [{self.fname}]")
+        # for backward compatibility; older qmap files do not have blemish
+        if "blemish" not in values:
+            values["blemish"] = np.copy(values["mask"])
+            logger.info("no blemish data is available, using mask instead")
+        else:
+            logger.info("blemish data is read from qmap successfully")
+
+        self.mask = values["mask"].astype(bool)
+        self.blemish = values["blemish"].astype(bool)
+        self.dqmap = values["dqmap"].astype(np.int32)
+        self.sqmap = values["sqmap"].astype(np.int32)
         if flag_fix:
             self.check_fix_qmap()
         self.det_size = self.mask.shape
-        self.dq_dim = np.max(self.dqmap)
-        self.sq_dim = np.max(self.sqmap)
-        self.masked_pixels = int(np.sum(self.mask == 1))
+        self.dq_dim = int(np.max(self.dqmap))
+        self.sq_dim = int(np.max(self.sqmap))
+        self.masked_pixels = int(np.sum(self.mask))
         self.masked_ratio = self.masked_pixels / self.mask.size
 
     def update_file(self):
@@ -300,7 +304,7 @@ class XpcsQPartitionMap(object):
 
     def update_mask_crop(self, crop_ratio_threshold):
         if self.masked_ratio < crop_ratio_threshold:
-            logger.info(f"masked_ratio is too low. Apply crop-mask on the raw input.")
+            logger.info("masked_ratio is too low. Apply crop-mask on the raw input.")
             mask_crop = self.info["mask_idx_1d"]
         else:
             mask_crop = None
@@ -389,7 +393,6 @@ class XpcsQPartitionMap(object):
         if apply_nan:
             snan_idx = self.info["snan_idx"]
             result = result[..., ~snan_idx]
-        # result = result.cpu().numpy()
         return result
 
     def recover_dimension(self, saxs2d, flag_crop, apply_mask=False):
@@ -495,27 +498,6 @@ def check_and_fix_qmap(fname):
         for k, v in info["dq_sq_map"].items():
             logger.info(f"dq: {k} <-> {v}: sq")
         logger.info(f"[{fname}] is consistent")
-
-
-def test():
-    import time
-
-    t0 = time.perf_counter()
-    # "/scratch/xpcs_data_raw/qmap/foster202110_qmap_RubberDonut_Lq0_S180_18_D18_18.h5"
-    xpm = XpcsQPartitionMap(
-        "/scratch/xpcs_data_raw/qmap/qzhang20191006_qmap_Rigaku_S270_D27_log.h5",
-        device="cuda:0",
-    )
-    print("time: ", round(time.perf_counter() - t0, 3))
-    print(xpm.sqmap.shape)
-    # print(np.sum(xpm.dcount))
-    print(xpm.mask.dtype)
-    print(xpm.masked_ratio)
-    print(xpm.masked_pixels)
-    import matplotlib.pyplot as plt
-
-    plt.imshow(xpm.sqmap)
-    plt.show()
 
 
 if __name__ == "__main__":
