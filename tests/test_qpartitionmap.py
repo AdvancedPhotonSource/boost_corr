@@ -306,5 +306,56 @@ class TestSelectSort(QMapTestCase):
             self.assertTrue(np.all(sqmap.ravel()[idx[slc]] == sq))
 
 
+class TestCheckFixQmap(QMapTestCase):
+    def split_sq_bin(self, sq, fraction):
+        """move a fraction of the pixels of a sq bin to the next dq bin"""
+        dqmap, sqmap, mask = make_maps()
+        idx = np.flatnonzero(sqmap.ravel() == sq)
+        dq = int(dqmap.ravel()[idx[0]])
+        moved = idx[: int(round(len(idx) * fraction))]
+        dqmap.ravel()[moved] = dq + 1
+        return dqmap, sqmap, mask, dq, idx
+
+    def test_consistent_qmap_is_untouched(self):
+        dqmap, sqmap, mask = make_maps()
+        qpm = XpcsQPartitionMap(self.write_qmap(dqmap, sqmap, mask))
+        self.assertTrue(qpm.check_fix_qmap())
+        np.testing.assert_array_equal(qpm.dqmap, dqmap)
+
+    def test_pixels_move_to_the_majority_dq_bin(self):
+        # the sq bin is larger than half of the detector rows, which the
+        # majority must not be measured against
+        for fraction, winner in [(0.2, 0), (0.8, 1), (0.5, 0)]:
+            with self.subTest(fraction=fraction):
+                dqmap, sqmap, mask, dq, idx = self.split_sq_bin(14, fraction)
+                self.assertGreater(len(idx), 2 * (DET_SIZE[0] // 2))
+                qpm = XpcsQPartitionMap(self.write_qmap(dqmap, sqmap, mask))
+                self.assertFalse(qpm.check_fix_qmap())
+                self.assertTrue(np.all(qpm.dqmap.ravel()[idx] == dq + winner))
+                # nothing else moved, and it is consistent now
+                other = np.ones(dqmap.size, dtype=bool)
+                other[idx] = False
+                np.testing.assert_array_equal(
+                    qpm.dqmap.ravel()[other], dqmap.ravel()[other]
+                )
+                self.assertTrue(qpm.check_fix_qmap())
+                qpm.select_sort()
+
+    def test_flag_fix_on_load(self):
+        dqmap, sqmap, mask, dq, idx = self.split_sq_bin(14, 0.2)
+        fname = self.write_qmap(dqmap, sqmap, mask)
+        qpm = XpcsQPartitionMap(fname, flag_fix=True, flag_sort=True)
+        self.assertTrue(np.all(qpm.dqmap.ravel()[idx] == dq))
+
+    def test_sq_bin_in_three_dq_bins(self):
+        dqmap, sqmap, mask = make_maps()
+        idx = np.flatnonzero(sqmap.ravel() == 2)
+        dqmap.ravel()[idx[:3]] = 4
+        dqmap.ravel()[idx[3:6]] = 5
+        qpm = XpcsQPartitionMap(self.write_qmap(dqmap, sqmap, mask))
+        with self.assertRaises(AssertionError):
+            qpm.check_fix_qmap()
+
+
 if __name__ == "__main__":
     unittest.main()

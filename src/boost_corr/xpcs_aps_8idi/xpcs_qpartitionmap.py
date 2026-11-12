@@ -307,22 +307,27 @@ class XpcsQPartitionMap(object):
         return mask_crop
 
     def check_fix_qmap(self):
-        flag = True
-        sq_list = np.sort(np.unique(self.sqmap[self.sqmap > 0]))
+        """
+        make each sq bin belong to one dq bin, by moving its pixels to the dq
+        bin that has most of them; returns True if nothing has to be fixed
+        """
+        num_dq, num_sq = int(self.dqmap.max()) + 1, int(self.sqmap.max()) + 1
+        key = self.sqmap.ravel().astype(np.int64) * num_dq + self.dqmap.ravel()
+        # number of pixels in each (sq, dq) pair; sq = 0 is not a bin
+        pair = np.bincount(key, minlength=num_sq * num_dq).reshape(num_sq, num_dq)
+        dq_num = np.count_nonzero(pair[1:], axis=1)
+        assert np.all(dq_num <= 2), "only support sqmap belongs up to 2 bins"
+
+        sq_list = np.flatnonzero(dq_num == 2) + 1
         for sq in sq_list:
-            sq_roi = self.sqmap == sq
-            dq = np.sort(np.unique(self.dqmap[sq_roi]))
-            assert len(dq) in (1, 2), "only support sqmap belongs up to 2 bins"
-            if len(dq) > 1:  # only works for 2
-                flag = False
-                idx_0 = np.logical_and(self.dqmap == dq[0], sq_roi)
-                logger.warning(f"qmap inconsistent at sq: {sq} <-> {dq}: dq")
-                if np.sum(idx_0) < len(sq_roi) // 2:
-                    self.dqmap[idx_0] = dq[1]
-                else:
-                    idx_1 = np.logical_and(self.dqmap == dq[1], sq_roi)
-                    self.dqmap[idx_1] = dq[0]
-        return flag
+            dq = np.flatnonzero(pair[sq])
+            logger.warning(f"qmap inconsistent at sq: {sq} <-> {dq}: dq")
+        if sq_list.size > 0:
+            # the lower dq bin takes the pixels if both have the same number
+            major_dq = np.argmax(pair, axis=1)
+            roi = np.isin(self.sqmap, sq_list)
+            self.dqmap[roi] = major_dq[self.sqmap[roi]]
+        return sq_list.size == 0
 
     def select_sort(self, dq_selection=None):
         """
