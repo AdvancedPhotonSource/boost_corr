@@ -9,6 +9,7 @@ from typing import Any, Optional, Union
 import torch
 
 import boost_corr.xpcs_aps_8idi.exceptions as exc
+from boost_corr import __version__ as boost_corr_version
 from boost_corr import log_timer
 
 from ...correlator.event import EventCorrelator
@@ -481,6 +482,7 @@ def solve_correlation(
     analysis_kwargs = {
         k: v for k, v in locals().items() if k not in ("save_results", "kwargs")
     }
+    analysis_kwargs["boost_corr_version"] = boost_corr_version
 
     device = get_device(gpu_id)
 
