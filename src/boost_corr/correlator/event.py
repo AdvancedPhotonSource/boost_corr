@@ -228,6 +228,15 @@ class EventCorrelator:
             "event_delay_list_acf": results["acf"]["lag"],
             "event_g2_acf": results["acf"]["g2"],
             "event_g2_acf_err": results["acf"]["err"],
+            # pyXpcsViewer's load_data() also requires
+            # /xpcs/multitau/config/{stride_frame,avg_frame} to exist for any
+            # file whose analysis type includes "Multitau". Always 1 here by
+            # construction: solve_correlation rejects any --stride-frame/
+            # --avg-frame != 1 on the event path (get_events() always reads
+            # the whole file). The corresponding frame_time (t0) override
+            # that makes downstream tau*t0 scaling correct is in
+            # common.py's Event branch of _build_run_args.
+            "multitau_config": {"stride_frame": 1, "avg_frame": 1},
         }
         # the CCF lag axis is identical across directions (same edges_ccf
         # used for all of them), so it's safe for either branch below to
@@ -240,5 +249,21 @@ class EventCorrelator:
             payload["event_delay_list_ccf"] = results["ccf"]["vertical"]["lag"]
             payload["event_g2_ccf_v"] = results["ccf"]["vertical"]["g2"]
             payload["event_g2_ccf_v_err"] = results["ccf"]["vertical"]["err"]
+
+        # Alias the CCF result -- not ACF -- into the plain multitau schema
+        # (/xpcs/multitau/delay_list, normalized_g2[_err]) so downstream
+        # tools that only recognize Multitau/Twotime output (e.g.
+        # pyXpcsViewer's get_analysis_type(), which just checks whether
+        # these paths exist) see the correlation --signal-spill actually
+        # selected, which is the CCF, not the direction-independent ACF.
+        # Multitau's g2/g2_err convention is (n_tau, n_dq); ours is
+        # (n_dq, n_tau) -- transpose to match. When both directions are
+        # requested (vh), vertical wins the alias, matching the tie-break
+        # event_delay_list_ccf already uses above.
+        primary_direction = "vertical" if "vertical" in self.directions else "horizontal"
+        payload["delay_list"] = results["ccf"][primary_direction]["lag"]
+        payload["g2"] = results["ccf"][primary_direction]["g2"].T
+        payload["g2_err"] = results["ccf"][primary_direction]["err"].T
+
         payloads.append(payload)
         return payloads

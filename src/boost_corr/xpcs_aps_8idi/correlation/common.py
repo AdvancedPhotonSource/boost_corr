@@ -381,6 +381,23 @@ def _build_run_args(
         run_opts["normalize_opts"] = {"skip_scattering": skip_scattering}
         run_opts["debug_extra_keys"] = ("num_segments",)
 
+        def _post_save(rf, dset):
+            # EventCorrelator's delay_list/tau is already physically-scaled
+            # to nanoseconds (see event.py's post_process: lag = bin_index *
+            # bin_width_ns), not a raw frame count -- unlike multitau, whose
+            # tau is a frame count multiplied by frame_time downstream
+            # (pyXpcsViewer: t_el = tau * frame_time * stride_frame *
+            # avg_frame). Reusing correct_t0_for_timepix4's generic
+            # frame_time-overwrite mechanism (despite its Timepix4-specific
+            # name) to set frame_time=1e-9 s makes that same downstream
+            # arithmetic correct for any event-mode source dataset: tau (a
+            # plain number of nanoseconds) times 1e-9 s/ns times
+            # stride_frame=avg_frame=1 (see the multitau_config alias in
+            # EventCorrelator.get_normalized_payloads) yields seconds.
+            rf.correct_t0_for_timepix4(1e-9)
+
+        run_opts["save_post_save"] = _post_save
+
     return dict(
         qpm=qpm,
         device=device,

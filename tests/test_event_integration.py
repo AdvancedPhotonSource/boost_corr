@@ -92,9 +92,44 @@ class TestEventCorrelatorIntegration(unittest.TestCase):
             self.assertIn("/xpcs/event/normalized_g2_acf", f)
             self.assertIn("/xpcs/event/normalized_g2_ccf_h", f)
             self.assertNotIn("/xpcs/event/normalized_g2_ccf_v", f)
-            self.assertNotIn("/xpcs/multitau/normalized_g2", f)
             g2_acf = f["/xpcs/event/normalized_g2_acf"][()]
             self.assertEqual(g2_acf.shape[0], 1)  # one dq ring
+
+            # The CCF result (not ACF) is aliased into the plain multitau
+            # schema (/xpcs/multitau/normalized_g2[_err], delay_list) so
+            # downstream tools that only recognize Multitau/Twotime output
+            # (e.g. pyXpcsViewer's get_analysis_type()) see the correlation
+            # --signal-spill actually selected ("h" here) instead of the
+            # direction-independent ACF. Multitau's convention is
+            # (n_tau, n_dq) -- transposed from event's own (n_dq, n_tau) --
+            # so check the transposed shape and numeric equality against the
+            # event-schema CCF-h copy.
+            g2_ccf_h = f["/xpcs/event/normalized_g2_ccf_h"][()]
+            self.assertIn("/xpcs/multitau/normalized_g2", f)
+            self.assertIn("/xpcs/multitau/normalized_g2_err", f)
+            self.assertIn("/xpcs/multitau/delay_list", f)
+            g2_multitau = f["/xpcs/multitau/normalized_g2"][()]
+            self.assertEqual(g2_multitau.shape, (g2_ccf_h.shape[1], g2_ccf_h.shape[0]))
+            np.testing.assert_array_equal(g2_multitau, g2_ccf_h.T)
+            event_tau = f["/xpcs/event/delay_list_ccf"][()]
+            np.testing.assert_array_equal(f["/xpcs/multitau/delay_list"][()], event_tau)
+
+            # pyXpcsViewer's load_data() also needs stride_frame/avg_frame
+            # under /xpcs/multitau/config, and computes physical elapsed
+            # time as t_el = tau * frame_time * stride_frame * avg_frame.
+            # EventCorrelator's tau is already a plain number of
+            # nanoseconds (not a raw frame count like multitau's), so
+            # frame_time must be overridden to 1e-9 (1 ns in seconds) for
+            # that arithmetic to yield correct physical seconds -- verify
+            # the whole chain, not just that the fields exist.
+            self.assertEqual(f["/xpcs/multitau/config/stride_frame"][()], 1)
+            self.assertEqual(f["/xpcs/multitau/config/avg_frame"][()], 1)
+            frame_time = f["/entry/instrument/detector_1/frame_time"][()]
+            self.assertAlmostEqual(frame_time, 1e-9)
+            stride_frame = f["/xpcs/multitau/config/stride_frame"][()]
+            avg_frame = f["/xpcs/multitau/config/avg_frame"][()]
+            t_el = event_tau * frame_time * stride_frame * avg_frame
+            np.testing.assert_allclose(t_el, event_tau * 1e-9)
 
     def test_signal_spill_with_twotime_raises_before_touching_data(self):
         with self.assertRaises(ConfigurationError):
