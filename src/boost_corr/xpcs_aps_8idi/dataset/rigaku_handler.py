@@ -98,7 +98,11 @@ class RigakuDataset(XpcsDataset):
                 sl = self.mem_addr[idx]
                 x[n, self.ifc[0][sl].long()] = self.ifc[2][sl]
         x = x.to(self.device)
-        x = self.update_signal_spill(x.reshape(size, *self.det_size))
+        # disabled for now: signal-spill correction is superseded by the
+        # event correlator's CCF direction mechanism when --signal-spill is
+        # set (see EventCorrelator). Kept, not deleted, for reference/future
+        # reactivation.
+        # x = self.update_signal_spill(x.reshape(size, *self.det_size))
         x = x.reshape(size, self.pixel_num)
         if self.mask_crop is not None:
             x = x[:, self.mask_crop]

@@ -91,7 +91,11 @@ class Rigaku3MDataset(XpcsDataset):
             temp = module.__getbatch__(idx)
             canvas = self.append_data(canvas, index, temp)
 
-        canvas = self.update_signal_spill(canvas)
+        # disabled for now: signal-spill correction is superseded by the
+        # event correlator's CCF direction mechanism when --signal-spill is
+        # set (see EventCorrelator). Kept, not deleted, for reference/future
+        # reactivation.
+        # canvas = self.update_signal_spill(canvas)
         canvas = canvas.reshape(size, -1)
         if self.mask_crop is not None:
             canvas = canvas[:, self.mask_crop]

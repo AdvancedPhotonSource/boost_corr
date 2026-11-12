@@ -124,7 +124,11 @@ class TimepixAnalysisDataset(XpcsDataset):
                 canvas[:actual_batch_size, :, layout] = _data
 
             # print(canvas.shape) # canvas is 3d
-            canvas = self.update_signal_spill(canvas)
+            # disabled for now: signal-spill correction is superseded by the
+            # event correlator's CCF direction mechanism when --signal-spill
+            # is set (see EventCorrelator). Kept, not deleted, for
+            # reference/future reactivation.
+            # canvas = self.update_signal_spill(canvas)
             canvas = canvas[0:actual_batch_size].view(actual_batch_size, self.pixel_num)
 
         if self.mask_crop is not None:
