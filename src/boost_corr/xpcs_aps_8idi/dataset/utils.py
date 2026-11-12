@@ -92,5 +92,8 @@ def create_dataset(raw_fname, **kwargs):
         raise TypeError(f"File type [{ext}] is not supported")
 
     dset = dataset_method(raw_fname, batch_size=batch_size, **kwargs)
+    # a direct-read HDF dataset prefetches with its own threads
+    if getattr(dset, "direct_read", False):
+        use_loader = False
 
     return dset, use_loader
