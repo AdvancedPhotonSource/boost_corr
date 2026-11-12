@@ -40,14 +40,14 @@ class TimepixAnalysisDataset(XpcsDataset):
         )
         self.ifc_list = self.to_device()
 
-    def to_device(self, max_fsize_gb_in_gpu=1.0):
+    def to_device(self, max_fsize_gb_in_gpu=4.0):
         ifc_device = []
         for ifc in self.ifc_list:
             module_ifc = self.to_device_single_module(ifc, max_fsize_gb_in_gpu)
             ifc_device.append(module_ifc)
         return ifc_device
 
-    def to_device_single_module(self, ifc, max_fsize_gb_in_gpu=1.0):
+    def to_device_single_module(self, ifc, max_fsize_gb_in_gpu=4.0):
         total_size = sum([arr.nbytes for arr in ifc]) / 1024**3
         if total_size <= max_fsize_gb_in_gpu and is_gpu_device(self.device):
             logger.info("Preloading timepix rawdata to GPU memory")
