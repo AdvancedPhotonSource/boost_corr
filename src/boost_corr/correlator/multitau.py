@@ -159,14 +159,18 @@ class MultitauCorrelator(object):
         )
 
     def describe(self):
-        logger.info(f"queue information (auto, size, level): {self.queue_info}")
-        dlist = [str(self.dtype_list[n][0]) for n in range(len(self.dtype_list))]
-        dlist_uniq = list(set(dlist))
-        dlist_uniq.sort()
-        for x in dlist_uniq:
-            logger.info(f"stage @ {dlist.count(x):02d}: {x}")
-        logger.info(f"max_memory:  {self.max_memory} GB")
-        logger.info(f"normalize frame to account for intensity fluctuation: {self.normalize_frame}")
+        logger.info(
+            f"multitau: {self.tau_num} delays in {self.levels_num} levels, "
+            f"frame normalization {'on' if self.normalize_frame else 'off'}"
+        )
+        auto, size, level = self.queue_info
+        logger.info(
+            f"queue: {size} frames, halved every {level} levels"
+            f"{' (auto)' if auto else ''}, memory limit {self.max_memory} GB"
+        )
+        dlist = [str(x[0]).replace("torch.", "") for x in self.dtype_list]
+        counts = [f"{dlist.count(x)} x {x}" for x in sorted(set(dlist))]
+        logger.info(f"level buffers: {', '.join(counts)}")
 
     def reset(self):
         for n in range(self.levels_num):

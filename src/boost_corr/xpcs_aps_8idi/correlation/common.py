@@ -113,7 +113,8 @@ def run_correlation(
         raise exc.ProcessingError from e
     t_diff = time.perf_counter() - t_start
     logger.info(
-        f"correlation finished in {t_diff:.2f}s. frequency = {dset.frame_num / t_diff:.2f} Hz"
+        f"correlation: {dset.frame_num} frames in {t_diff:.3f}s, "
+        f"{dset.frame_num / t_diff:.0f} frames/s"
     )
 
 
@@ -124,7 +125,7 @@ def normalize_results(correlator, qpm, **opts):
         payloads = correlator.get_normalized_payloads(qpm, **opts)
     except Exception as e:
         raise exc.PostProcessingError from e
-    logger.info("normalization finished in %.3fs" % (time.perf_counter() - t_start))
+    logger.info(f"normalization: {time.perf_counter() - t_start:.3f}s")
     return payloads
 
 
@@ -199,7 +200,6 @@ def run_jobs(
             if verbose:
                 dset.describe()
                 correlator.describe()
-                logger.info("correlation solver created.")
 
             run_correlation(
                 correlator,
@@ -511,10 +511,11 @@ def solve_correlation(
     need_twotime = analysis_type in ("Twotime", "Both")
     qpm_kwargs: dict = {}
     if need_twotime:
-        logger.info(
-            f"forcing cropping to use only valid pixels: "
-            f"{crop_ratio_threshold=:.2f} -> 1.0"
-        )
+        if crop_ratio_threshold != 1.0:
+            logger.info(
+                "twotime needs the frames cropped to the valid pixels: "
+                f"crop_ratio_threshold {crop_ratio_threshold:.2f} -> 1.0"
+            )
         crop_ratio_threshold = 1.0
         qpm_kwargs.update(dq_selection=dq_selection, flag_sort=True)
 

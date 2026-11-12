@@ -89,7 +89,7 @@ class TestBoost_corr(unittest.TestCase):
                                frame_num=16, device='cpu')
         with self.assertLogs('boost_corr.correlator.twotime', 'INFO') as cm:
             tt.describe()
-        self.assertTrue(any('dynamic q bins: 4' in x for x in cm.output))
+        self.assertIn('twotime: 4 dynamic q bins', cm.output[0])
 
     def test_004_all_correlators_describe(self):
         from boost_corr.correlator import EventCorrelator, MultitauCorrelator

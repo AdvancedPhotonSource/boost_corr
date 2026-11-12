@@ -67,8 +67,8 @@ class HdfDataset(XpcsDataset):
                     self.dtype = np.int32
             elif data.dtype == np.uint32:
                 self.dtype = np.int32
-                logger.warn('cast uint32 to int32. it may cause ' + 
-                            'overflow when the maximal value >= 2^31')
+                logger.warning('uint32 data is read as int32; '
+                               'counts >= 2^31 will overflow')
             else:
                 self.dtype = data.dtype
         
@@ -91,7 +91,7 @@ class HdfDataset(XpcsDataset):
             num_threads = min(DEFAULT_NUM_THREADS, cpu_count)
         self.num_threads = num_threads
         if self.direct_read:
-            logger.info(f'direct read ({self.source.describe()}) with '
+            logger.info(f'hdf5 direct read: {self.source.describe()}, '
                         f'{self.num_threads} threads')
         self.decoder = None
         self.pool = None

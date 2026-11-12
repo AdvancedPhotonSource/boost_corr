@@ -33,7 +33,9 @@ class RigakuDataset(XpcsDataset):
             device = self.device
         else:
             device = "cpu"
-            logger.info(f"{self.fname} is {fsize:.2f} GB, offloading to CPU RAM")
+            logger.info(
+                f"{os.path.basename(self.fname)}: {fsize:.2f} GB, kept in CPU RAM"
+            )
 
         index = torch.tensor(self.ifc[0].astype(np.int32), device=device)
         frame = torch.tensor(self.ifc[1].astype(np.int32), device=device)

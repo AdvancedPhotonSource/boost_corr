@@ -240,16 +240,17 @@ class XpcsQPartitionMap(object):
         return plan
 
     def describe(self):
-        logger.info(f"qmap file: {self.fname}")
-        logger.info(f"flag_sort: {self.flag_sort}")
-        logger.info(
-            f"masked area pixels/ratio: "
-            f"{self.masked_pixels}/"
-            f"{self.masked_ratio * 100:.4f}%"
-        )
+        logger.info(f"qmap: {self.fname}")
         # omit dq = 0 which is not used
         dq_num = np.count_nonzero(np.bincount(self.dqmap.ravel())[1:])
-        logger.info(f"dq_map length: {dq_num}")
+        sq_num = np.count_nonzero(~self.info_np["snan_idx"])
+        order = "sorted by q bin" if self.flag_sort else "in detector order"
+        logger.info(f"q bins: {dq_num} dynamic, {sq_num} static, pixels {order}")
+        crop = "cropped to them" if self.mask_crop is not None else "not cropped"
+        logger.info(
+            f"valid pixels: {self.masked_pixels} of {self.mask.size} "
+            f"({self.masked_ratio * 100:.2f}%), frames {crop}"
+        )
 
     def load(self, flag_fix=False):
         values = {}
@@ -264,9 +265,7 @@ class XpcsQPartitionMap(object):
         # for backward compatibility; older qmap files do not have blemish
         if "blemish" not in values:
             values["blemish"] = np.copy(values["mask"])
-            logger.info("no blemish data is available, using mask instead")
-        else:
-            logger.info("blemish data is read from qmap successfully")
+            logger.info("qmap has no blemish, the mask is used instead")
 
         self.mask = values["mask"].astype(bool)
         self.blemish = values["blemish"].astype(bool)
@@ -289,7 +288,6 @@ class XpcsQPartitionMap(object):
 
     def update_mask_crop(self, crop_ratio_threshold):
         if self.masked_ratio < crop_ratio_threshold:
-            logger.info("masked_ratio is too low. Apply crop-mask on the raw input.")
             mask_crop = self.info["mask_idx_1d"]
         else:
             mask_crop = None
@@ -365,7 +363,7 @@ class XpcsQPartitionMap(object):
 
         dq_idx = info["dq_idx"]
         total_dq, dq_min, dq_max = len(dq_idx), min(dq_idx), max(dq_idx)
-        logger.info(f"total dq: {total_dq}. min - max: {dq_min} - {dq_max}")
+        logger.info(f"dynamic q bins selected: {total_dq} ({dq_min} to {dq_max})")
         return mask_idx_1d_sort, info
 
     def normalize_sqmap(self, img, flag_crop, apply_nan=True):

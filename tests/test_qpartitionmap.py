@@ -371,7 +371,7 @@ class TestLoad(QMapTestCase):
         np.testing.assert_array_equal(qpm.blemish, mask.astype(bool))
         with self.assertLogs("boost_corr", level="INFO") as log:
             qpm.describe()
-        self.assertIn("dq_map length: 5", log.output[-1])
+        self.assertIn("q bins: 5 dynamic, 20 static", log.output[1])
 
     def test_blemish(self):
         dqmap, sqmap, mask = make_maps()

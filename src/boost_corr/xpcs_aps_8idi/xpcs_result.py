@@ -130,17 +130,17 @@ class XpcsResult:
     ) -> None:
         # dirname(FILES_IN_CURRENT_FOLDER) gives empty string
         if meta_fname is None:
-            logger.info(f"Using raw data directory as metadata directory: {raw_fname}")
             meta_dir = os.path.dirname(os.path.abspath(raw_fname))
             meta_fname, meta_ftype = get_metadata(meta_dir)
+            source = "found next to the raw file"
         else:
             assert os.path.isfile(meta_fname), f"metadata file {meta_fname} does not exist"
-            logger.info(f"Using provided metadata file: {meta_fname}")
             is_meta, meta_ftype = is_metadata(meta_fname)
             if not is_meta:
                 raise TypeError(f"metadata file {meta_fname} is not a valid metadata file")
+            source = "given by the user"
 
-        logger.info(f"metadata filename/type is {meta_fname} | {meta_ftype}")
+        logger.info(f"metadata: {meta_fname} ({meta_ftype}, {source})")
 
         self.meta_fname = meta_fname
         self.raw_fname = raw_fname
@@ -247,12 +247,12 @@ class XpcsResult:
         for temp_file in [self.fname_temp, self.G2_fname_temp]:
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-                logger.info(f"Cleaned up temporary file: {temp_file}")
+                logger.info(f"temporary file removed: {temp_file}")
 
         if self.success:
-            logger.info(f"Succeeded in saving result file: {self.fname}")
+            logger.info(f"result saved: {self.fname}")
         else:
-            logger.error(f"Failed in saving result file: {self.fname}")
+            logger.error(f"result not saved: {self.fname}")
         return self.success
 
 

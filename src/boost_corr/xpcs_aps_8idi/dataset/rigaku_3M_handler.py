@@ -43,8 +43,8 @@ class Rigaku3MDataset(XpcsDataset):
             assert os.path.isfile(f), "file not found: {f}"
         # determine the total number of frames
         total_frames = [get_number_of_frames_from_binfile(f) for f in flist]
-        for n, f in enumerate(flist):
-            logger.info(f"{f}: {total_frames[n]}")
+        frames = [f"{f[-3:]}={n}" for f, n in zip(flist, total_frames)]
+        logger.info(f"module frames: {', '.join(frames)}")
         total_frames = max(total_frames)
 
         kwargs.pop("mask_crop", None)

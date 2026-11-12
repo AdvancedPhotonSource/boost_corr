@@ -184,25 +184,39 @@ class XpcsDataset(object):
         return result
 
     def describe(self):
-        for key, val in self.get_description().items():
-            logger.info(f"{key}: {val}")
+        storage = "sparse" if self.is_sparse else "dense"
+        logger.info(
+            f"dataset: {self.fname} ({self.dataset_type}, {storage}, "
+            f"{self.raw_size:.1f} MB)"
+        )
+        logger.info(
+            f"frames: {self.frame_num} correlated of {self.frame_num_raw} raw "
+            f"(begin={self.begin_frame}, end={self.end_frame}, "
+            f"stride={self.stride}, avg={self.avg_frame})"
+        )
 
         if self.mask_crop is not None:
             valid_size = self.mask_crop.shape[0]
         else:
             valid_size = self.pixel_num
-        logger.info(f"dtype: {self.dtype}")
-        logger.info(f"valid_size: {valid_size}")
+        logger.info(
+            f"detector: {self.det_size[0]} x {self.det_size[1]}, "
+            f"{valid_size} pixels kept, dtype {np.dtype(self.dtype).name}"
+        )
+        logger.info(
+            f"batches: {self.batch_num} x {self.batch_size} frames on {self.device}"
+        )
         if self.skip_sparsity_check:
             # get_sparsity() calls __getbatch__(0), which for a lazy-mem_addr
             # dataset (RigakuExtendDataset/.bix) forces the exact per-frame
             # slice table this class exists to avoid building -- and for a
             # nanosecond-scale time bin, "fraction of pixels hit in one bin"
             # isn't a meaningful density number anyway.
-            logger.info("sparsity: skipped")
+            logger.info("first frame: nonzero pixels not counted")
         else:
-            logger.info(f"sparsity: {self.get_sparsity():.4f}")
-        logger.info(f"raw dataset file size: {self.raw_size:.2f} MB")
+            logger.info(
+                f"first frame: {self.get_sparsity() * 100:.2f}% of pixels nonzero"
+            )
 
     def __len__(self):
         return self.batch_num
