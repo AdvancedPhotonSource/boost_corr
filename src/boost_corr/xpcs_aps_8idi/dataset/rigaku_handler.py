@@ -23,8 +23,9 @@ class RigakuDataset(XpcsDataset):
         self.dataset_type = "Rigaku 64bit Binary"
         self.is_sparse = True
         self.dtype = np.uint8
-        self.ifc, self.mem_addr = self.read_data(total_frames)
+        self.ifc = self.read_data(total_frames)
         self.ifc = self.to_device()
+        self._mem_addr = None
 
     def to_device(self, max_fsize_gb_in_gpu=1.0):
         fsize = os.path.getsize(self.fname) / 1024**3
@@ -56,13 +57,30 @@ class RigakuDataset(XpcsDataset):
         # update frame_num and batch_num
         self.update_batch_info(total_frames)
 
-        all_index = np.arange(0, self.frame_num_raw + 2)
-        all_index[-1] = self.frame_num_raw
-        # build an index map for all indexes
-        beg = np.searchsorted(frame, all_index[:-1])
-        end = np.searchsorted(frame, all_index[1:])
-        mem_addr = [slice(a, b) for a, b in zip(beg, end)]
-        return (index, frame, count), mem_addr
+        # mem_addr (the per-frame begin/end slice table) is built lazily --
+        # see the mem_addr property below. It is only needed by
+        # __getbatch__, the dense-frame path multitau/twotime use; the
+        # event correlator's get_events() never touches it. For finely
+        # time-binned data (frame_num_raw in the hundreds of millions to
+        # billions -- e.g. a nanosecond-binned RigakuExtend/.bix file) the
+        # np.arange + searchsorted + list-of-slices below can take tens of
+        # seconds to minutes, for no benefit if __getbatch__ is never called.
+        self._frame_for_mem_addr = frame
+        return (index, frame, count)
+
+    @property
+    def mem_addr(self):
+        """Per-frame (begin, end) slice into the frame-sorted event arrays,
+        built lazily on first access -- see the note in read_data()."""
+        if self._mem_addr is None:
+            frame = self._frame_for_mem_addr
+            frame_num_raw = self.frame_num_raw
+            all_index = np.arange(0, frame_num_raw + 2)
+            all_index[-1] = frame_num_raw
+            beg = np.searchsorted(frame, all_index[:-1])
+            end = np.searchsorted(frame, all_index[1:])
+            self._mem_addr = [slice(a, b) for a, b in zip(beg, end)]
+        return self._mem_addr
 
     def __getbatch__(self, idx):
         # frame begin and end

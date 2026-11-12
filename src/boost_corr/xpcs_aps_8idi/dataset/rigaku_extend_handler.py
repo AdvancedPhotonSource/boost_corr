@@ -14,6 +14,14 @@ class RigakuExtendDataset(RigakuDataset):
     def __init__(self, *args, **kwargs):
         super(RigakuExtendDataset, self).__init__(*args, **kwargs)
         self.dataset_type = "RigakuExtend 64bit Binary"
+        # .bix files are, in practice, only ever used with the event
+        # correlator (that's the whole reason this format's "frame" field is
+        # a fine time bin rather than a real camera frame) -- get_events()
+        # never calls __getbatch__/get_sparsity(), so skip the per-frame
+        # sparsity check in describe(): it forces building the lazy
+        # mem_addr table for no benefit, and "fraction of pixels hit in one
+        # 10ns-scale time bin" isn't a meaningful density metric anyway.
+        self.skip_sparsity_check = True
 
     def read_data(self, total_frames=None):
         with open(self.fname, "r") as f:
@@ -27,11 +35,6 @@ class RigakuExtendDataset(RigakuDataset):
 
         # update frame_num and batch_num
         self.update_batch_info(total_frames)
-
-        all_index = np.arange(0, self.frame_num_raw + 2)
-        all_index[-1] = self.frame_num_raw
-        # build an index map for all indexes
-        beg = np.searchsorted(frame, all_index[:-1])
-        end = np.searchsorted(frame, all_index[1:])
-        mem_addr = [slice(a, b) for a, b in zip(beg, end)]
-        return (index, frame, count), mem_addr
+        # mem_addr is built lazily -- see RigakuDataset.mem_addr's docstring.
+        self._frame_for_mem_addr = frame
+        return (index, frame, count)

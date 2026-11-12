@@ -64,6 +64,9 @@ class XpcsDataset(object):
         self.dataset_type = None
         self.dtype_raw = None
         self.bin_time_s = bin_time_s
+        # set True by subclasses (RigakuExtendDataset) whose get_sparsity()
+        # would be misleading and/or expensive to compute -- see describe()
+        self.skip_sparsity_check = False
 
     def update_signal_spill(self, x):
         if self.signal_spill in ("none", None):
@@ -190,7 +193,15 @@ class XpcsDataset(object):
             valid_size = self.pixel_num
         logger.info(f"dtype: {self.dtype}")
         logger.info(f"valid_size: {valid_size}")
-        logger.info(f"sparsity: {self.get_sparsity():.4f}")
+        if self.skip_sparsity_check:
+            # get_sparsity() calls __getbatch__(0), which for a lazy-mem_addr
+            # dataset (RigakuExtendDataset/.bix) forces the exact per-frame
+            # slice table this class exists to avoid building -- and for a
+            # nanosecond-scale time bin, "fraction of pixels hit in one bin"
+            # isn't a meaningful density number anyway.
+            logger.info("sparsity: skipped")
+        else:
+            logger.info(f"sparsity: {self.get_sparsity():.4f}")
         logger.info(f"raw dataset file size: {self.raw_size:.2f} MB")
 
     def __len__(self):
