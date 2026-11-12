@@ -287,21 +287,6 @@ class XpcsQPartitionMap(object):
             del f[key_map["dqmap"]]
             f[key_map["dqmap"]] = self.dqmap.astype(np.uint32)
 
-    def update_rotation(self, det_size):
-        if self.dqmap.shape != det_size:
-            logger.warning("qmap is rotated 90 deg to match the detctor oriention.")
-            self.dqmap = np.swapaxes(self.dqmap, 0, 1)
-            self.sqmap = np.swapaxes(self.sqmap, 0, 1)
-            self.mask = np.swapaxes(self.mask, 0, 1)
-            self.det_size = self.mask.shape
-            assert self.det_size == det_size, (
-                "The shape of QMap does not match the raw data shape"
-            )
-            # need redo the preprocessing
-            self.group_qmap()
-            return True
-        return False
-
     def update_mask_crop(self, crop_ratio_threshold):
         if self.masked_ratio < crop_ratio_threshold:
             logger.info("masked_ratio is too low. Apply crop-mask on the raw input.")

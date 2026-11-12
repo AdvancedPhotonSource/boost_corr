@@ -183,7 +183,11 @@ def run_jobs(
         try:
             check_metadata(raw_fname, meta_fname)
             dset, use_loader = create_dataset(raw_fname, **dset_kwargs)
-            qpm.update_rotation(dset.det_size)
+            if tuple(dset.det_size) != tuple(qpm.det_size):
+                raise exc.QMapError(
+                    f"qmap shape {tuple(qpm.det_size)} does not match the "
+                    f"detector shape {tuple(dset.det_size)}"
+                )
             correlator = prepare_correlator(correlator, dset)
             if correlator is None:
                 empty_gpu_cache(device)

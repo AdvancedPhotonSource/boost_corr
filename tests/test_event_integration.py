@@ -11,7 +11,7 @@ import h5py
 import numpy as np
 
 from boost_corr.xpcs_aps_8idi.correlation import solve_correlation
-from boost_corr.xpcs_aps_8idi.exceptions import ConfigurationError
+from boost_corr.xpcs_aps_8idi.exceptions import ConfigurationError, QMapError
 
 
 def pack_rigaku(count, pixel, frame):
@@ -30,7 +30,7 @@ class TestEventCorrelatorIntegration(unittest.TestCase):
         # RigakuDataset never overrides det_size, and solve_correlation has
         # no det_size parameter at all -- XpcsDataset's default (512, 1024)
         # is the only shape a plain .bin file can use here, or
-        # qpm.update_rotation() raises AssertionError on a shape mismatch.
+        # run_jobs() raises QMapError on a shape mismatch.
         # Use a small active patch within it, matching this project's real
         # run_246 qmap (a few hundred valid pixels out of 524288), rather
         # than a full 512x1024 mask.
@@ -143,6 +143,28 @@ class TestEventCorrelatorIntegration(unittest.TestCase):
                 gpu_id=-1,
             )
         self.assertFalse(os.path.isdir(self.output_dir))
+
+    def test_qmap_shape_mismatch_raises(self):
+        # a transposed qmap is not rotated to fit the detector any more
+        with h5py.File(self.qmap_fname, "r+") as f:
+            for key in ("dynamic_roi_map", "static_roi_map", "mask"):
+                data = f[f"/qmap/{key}"][()].T
+                del f[f"/qmap/{key}"]
+                f[f"/qmap/{key}"] = data
+        for signal_spill in ("h", None):
+            with self.subTest(signal_spill=signal_spill):
+                with self.assertRaisesRegex(QMapError, r"\(1024, 512\).*\(512, 1024\)"):
+                    solve_correlation(
+                        analysis_type="Multitau",
+                        signal_spill=signal_spill,
+                        raw=[self.raw_fname],
+                        qmap=self.qmap_fname,
+                        output=self.output_dir,
+                        meta_fname=self.meta_fname,
+                        gpu_id=-1,
+                        bin_time_s=1e-6,
+                    )
+                self.assertFalse(os.path.isdir(self.output_dir))
 
 
 if __name__ == "__main__":
