@@ -63,7 +63,6 @@ class HdfDataset(XpcsDataset):
 
         self.current_group = None
         self.preload_size = preload_size
-        self.cache = None
 
     def __reset__(self):
         if self.fhdl is not None:
@@ -80,12 +79,15 @@ class HdfDataset(XpcsDataset):
             self.data = self.fhdl[self.data_path]
 
         beg, end, size = self.get_raw_index(idx)
-        if self.cache is None or self.cache.shape[0] != size:
-            self.cache = np.zeros(shape=(size, self.shape[1], self.shape[2]), dtype=self.dtype)
+        # a new buffer for every batch. A DataLoader worker pickles the batch
+        # it returned in a background thread while the next one is already
+        # being read, so a buffer shared between batches hands out the
+        # frames of the wrong batch.
+        x = np.empty(shape=(size, self.shape[1], self.shape[2]), dtype=self.dtype)
         # idx_list = np.arange(beg, end, self.stride)
 
-        self.data.read_direct(self.cache, np.s_[beg:end:self.stride])
-        x = self.cache.reshape(size, self.pixel_num)
+        self.data.read_direct(x, np.s_[beg:end:self.stride])
+        x = x.reshape(size, self.pixel_num)
         if self.mask_crop is not None:
             x = x[:, self.mask_crop]
 
