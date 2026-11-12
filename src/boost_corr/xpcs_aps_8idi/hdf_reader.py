@@ -20,7 +20,7 @@ def put_results_in_hdf5(save_path, result, compression=None):
     result : dict
         Dictionary of results to save
     compression : str, optional
-        Compression method to use. If None, large arrays use gzip compression
+        Compression method to use. If None, large arrays use lzf compression
 
     Returns
     -------
@@ -38,7 +38,7 @@ def put_results_in_hdf5(save_path, result, compression=None):
                 chunks = tuple(chunks)
             else:
                 chunks = data.shape
-            return f.create_dataset(path, data=data, 
+            return f.create_dataset(path, data=data,
                                     compression='lzf',
                                     chunks=chunks)
         return f.create_dataset(path, data=data, compression=compression)
