@@ -9,13 +9,18 @@ import torch
 import numpy as np
 
 
-def run_and_get_result(frame_num=512, device='cpu', smooth_method='sqmap'):
-    det_size = (4, 5)
+def make_qinfo():
     qinfo = {}
     qinfo['dq_idx'] = np.arange(1, 5)    # 1, 2, 3, 4
     qinfo['dq_slc'] = [slice(x * 5 - 5, x * 5) for x in qinfo['dq_idx']]
     qinfo['sq_idx'] = np.arange(1, 21)   # 1, 2, ... ,20
     qinfo['sq_slc'] = [slice(x - 1, x) for x in qinfo['sq_idx']]
+    return qinfo
+
+
+def run_and_get_result(frame_num=512, device='cpu', smooth_method='sqmap'):
+    det_size = (4, 5)
+    qinfo = make_qinfo()
 
     num_elm = det_size[0] * det_size[1]
     tt = TwotimeCorrelator(qinfo=qinfo, det_size=det_size,
@@ -77,6 +82,19 @@ class TestBoost_corr(unittest.TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), 'CUDA is not available')
     def test_002_gpu(self):
         self.check_uniform_frames('cuda:0', 'sqmap')
+
+    def test_003_describe(self):
+        # run_jobs calls describe() on the correlator when verbose is set
+        tt = TwotimeCorrelator(qinfo=make_qinfo(), det_size=(4, 5),
+                               frame_num=16, device='cpu')
+        with self.assertLogs('boost_corr.correlator.twotime', 'INFO') as cm:
+            tt.describe()
+        self.assertTrue(any('dynamic q bins: 4' in x for x in cm.output))
+
+    def test_004_all_correlators_describe(self):
+        from boost_corr.correlator import EventCorrelator, MultitauCorrelator
+        for cls in (MultitauCorrelator, TwotimeCorrelator, EventCorrelator):
+            self.assertTrue(callable(getattr(cls, 'describe', None)), cls)
 
 
 if __name__ == '__main__':

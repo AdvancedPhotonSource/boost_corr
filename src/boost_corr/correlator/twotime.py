@@ -107,6 +107,13 @@ class TwotimeCorrelator:
             device=device,
         )
 
+    def describe(self):
+        logger.info(f"twotime method: {self.method}")
+        logger.info(f"number of dynamic q bins: {len(self.dq_slc)}")
+        logger.info(
+            f"frame cache (shape, dtype): {tuple(self.cache.shape)}, {self.cache.dtype}"
+        )
+
     def reset(self):
         self.cache.zero_()
         self.cache_ptr = 0
