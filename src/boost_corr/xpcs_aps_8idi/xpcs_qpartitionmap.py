@@ -17,6 +17,49 @@ key_map = {
 }
 
 
+# each q-bin is accumulated in up to MAX_SUB_BINS sub-bins, and each image in
+# up to MAX_SLOTS sub-bins in total
+MAX_SUB_BINS = 128
+MAX_SLOTS = 2**16
+
+
+def get_sub_bin_num(size):
+    return max(1, min(MAX_SUB_BINS, MAX_SLOTS // size))
+
+
+def get_slot_index(qmap: torch.Tensor, size: int) -> torch.Tensor:
+    """
+    Converts a q-bin index map to the index of the sub-bins (slots) that the
+    pixels are accumulated in. The pixels of a q-bin are spread over several
+    slots, so that neighboring pixels, which mostly share the q-bin, are not
+    added to the same memory location. It avoids the write contention of
+    index_add_ on GPU, and the shorter float32 sums are more accurate.
+
+    The slot index only depends on the qmap; compute it once and reuse it for
+    all the datasets.
+    """
+    qmap = qmap.view(-1).long()
+    pixel = torch.arange(qmap.shape[0], device=qmap.device)
+    num_sub = get_sub_bin_num(size)
+    return qmap * num_sub + pixel % num_sub
+
+
+def sum_with_slot_index(img: torch.Tensor, slot: torch.Tensor, size: int):
+    """
+    Sums img of shape (C, N) over the q-bins for all the C images at once.
+    Returns a tensor of shape (C, size); the first column is the index 0,
+    i.e. the pixels that belong to no q-bin.
+    """
+    if img.dtype not in (torch.float32, torch.float64):
+        img = img.float()
+    num_sub = get_sub_bin_num(size)
+    total = torch.zeros(
+        img.shape[0], size * num_sub, dtype=img.dtype, device=img.device
+    )
+    total.index_add_(1, slot, img)
+    return total.view(img.shape[0], size, num_sub).sum(dim=2)
+
+
 def find_bin_count(qmap, minlength=None):
     count = np.bincount(qmap.ravel(), minlength=minlength)[1:]
     count = count.astype(np.int32)
@@ -30,6 +73,7 @@ def average_with_index_map(
     qmap: torch.Tensor,
     size: Optional[int] = None,
     norm_factor: Optional[torch.Tensor] = None,
+    slot: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Computes the cluster-wise average intensity of an image tensor based on a
@@ -50,6 +94,9 @@ def average_with_index_map(
     norm_factor : torch.Tensor, optional
         A precomputed normalization factor for each cluster. If None, it is
         computed based on `qmap`.
+    slot : torch.Tensor, optional
+        The precomputed `get_slot_index(qmap, size)`. If None, it is computed
+        based on `qmap`.
 
     Returns
     -------
@@ -74,13 +121,11 @@ def average_with_index_map(
         norm_factor = torch.bincount(qmap, minlength=size)[1:]
         norm_factor[norm_factor == 0] = 1  # Avoid division by zero
 
+    if slot is None:
+        slot = get_slot_index(qmap, size)
+
     img = img.reshape(-1, num_pixels)
-    summed_values = torch.stack(
-        [
-            torch.bincount(qmap, weights=img[n], minlength=size)[1:]
-            for n in range(img.shape[0])
-        ]
-    )
+    summed_values = sum_with_slot_index(img, slot, size)[:, 1:]
 
     avg = summed_values.float() / norm_factor
     return avg
@@ -148,6 +193,51 @@ class XpcsQPartitionMap(object):
         self.info_np = info_np
         self.info = info
         self.qinfo = qinfo
+        # derived from the maps above on first use; shared by all the datasets
+        self.slot = {}
+        self.g2_plan = None
+
+    def get_slot(self, key, size):
+        if key not in self.slot:
+            self.slot[key] = get_slot_index(self.info[key], size)
+        return self.slot[key]
+
+    def get_g2_plan(self):
+        """
+        the part of compute_g2 that only depends on the qmap
+        """
+        if self.g2_plan is not None:
+            return self.g2_plan
+
+        dqmap = self.info["dqmap_crop"].long()
+        sqmap = self.info["sqmap_crop"]
+        num_dq, num_sq = self.dq_dim + 1, self.sq_dim + 1
+        # number of pixels in each (dq, sq) pair; index 0 is not a q-bin
+        pair = torch.bincount(dqmap * num_sq + sqmap, minlength=num_dq * num_sq)
+        pair = pair.reshape(num_dq, num_sq).cpu().numpy()
+
+        # the sq bins that overlap with each dq bin
+        dq_idx, sq_idx = np.nonzero(pair[1:, 1:])
+        sq_num = np.bincount(dq_idx, minlength=self.dq_dim)
+
+        # the mean and the variance of the mean of the pixels in a dq bin
+        count = pair[1:].sum(axis=1).astype(np.float64)
+        with np.errstate(divide="ignore"):
+            # a single pixel gives nan, the same as torch.std
+            var_norm = 1.0 / ((count - 1) * count)
+        var_norm[count == 0] = 0
+
+        plan = {
+            "dq_idx": dq_idx,
+            "sq_idx": sq_idx,
+            "sq_norm": (1.0 / np.maximum(sq_num, 1)).astype(np.float32),
+            "mean_norm": (1.0 / np.maximum(count, 1)).astype(np.float32),
+            "var_norm": var_norm.astype(np.float32),
+        }
+        for k, v in plan.items():
+            plan[k] = torch.tensor(v, device=self.device)
+        self.g2_plan = plan
+        return plan
 
     def describe(self):
         logger.info(f"qmap file: {self.fname}")
@@ -281,11 +371,10 @@ class XpcsQPartitionMap(object):
 
     def normalize_sqmap(self, img, flag_crop, apply_nan=True):
         scount = self.info["scount"]
-        if flag_crop:
-            sqmap = self.info["sqmap_crop"]
-        else:
-            sqmap = self.info["sqmap_full"]
-        result = average_with_index_map(img, sqmap, self.sq_dim + 1, scount)
+        key = "sqmap_crop" if flag_crop else "sqmap_full"
+        size = self.sq_dim + 1
+        slot = self.get_slot(key, size)
+        result = average_with_index_map(img, self.info[key], size, scount, slot)
 
         if apply_nan:
             snan_idx = self.info["snan_idx"]
@@ -352,10 +441,7 @@ class XpcsQPartitionMap(object):
         if not flag_crop:
             G2 = G2[..., self.info["mask_idx_1d"]]
         flag_crop = True
-
-        IP_IF = G2[:, 1] * G2[:, 2]
-        IP_IF[IP_IF == 0] = 1.0e8
-        g2_pixel = G2[:, 0] / IP_IF
+        plan = self.get_g2_plan()
 
         G2_sq = self.normalize_sqmap(G2, flag_crop, apply_nan=False)
         G2_sq = G2_sq.reshape(-1, 3, G2_sq.shape[1])
@@ -363,23 +449,25 @@ class XpcsQPartitionMap(object):
         IP_IF_sq = G2_sq[:, 1] * G2_sq[:, 2]
         IP_IF_sq[IP_IF_sq == 0] = 1.0e8
         g2_sq = G2_sq[:, 0] / IP_IF_sq
-
+        # average the sq bins that belong to each dq bin
         g2 = torch.zeros(G2.shape[0], self.dq_dim, device=G2.device)
-        g2_err = torch.zeros_like(g2)
+        g2.index_add_(1, plan["dq_idx"], g2_sq[:, plan["sq_idx"]])
+        g2 *= plan["sq_norm"]
 
-        dqmap = self.info["dqmap_crop"]
-        sqmap = self.info["sqmap_crop"]
-        for idx in range(1, self.dq_dim + 1):
-            roi_dq = dqmap == idx
-            if torch.sum(roi_dq) == 0:
-                continue
-            temp = g2_pixel[:, roi_dq]
-            g2_err[:, idx - 1] = torch.std(temp, axis=1) / np.sqrt(temp.shape[1])
-            # the sqmap index - 1 gives the index in the G2q
-            # roi = sqmap[idx_corr].long().unique() - 1
-            # [1, 2, 3, 4]
-            roi_sq = sqmap[roi_dq].long().unique() - 1
-            g2[:, idx - 1] = torch.mean(g2_sq[:, roi_sq], axis=1)
+        IP_IF = G2[:, 1] * G2[:, 2]
+        IP_IF[IP_IF == 0] = 1.0e8
+        g2_pixel = torch.div(G2[:, 0], IP_IF, out=IP_IF)
+
+        # standard error of the pixels in each dq bin; subtract the mean of
+        # the bin first, as torch.std does, to keep the float32 precision
+        size = self.dq_dim + 1
+        slot = self.get_slot("dqmap_crop", size)
+        mean = sum_with_slot_index(g2_pixel, slot, size)
+        mean[:, 1:] *= plan["mean_norm"]
+        g2_pixel -= mean[:, self.info["dqmap_crop"]]
+        g2_pixel.square_()
+        g2_var = sum_with_slot_index(g2_pixel, slot, size)[:, 1:] * plan["var_norm"]
+        g2_err = torch.sqrt(g2_var)
 
         return g2, g2_err
 
