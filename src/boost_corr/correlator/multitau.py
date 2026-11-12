@@ -294,7 +294,8 @@ class MultitauCorrelator(object):
             # sl = slice(self.current_frame - end + beg, self.current_frame)
             intt = torch.mean(self.ct[level][beg:end].float(), dim=1)
             self.intt.append(intt)
-            self.saxs_2d += torch.sum(self.ct[level][beg:end].float(), dim=0)
+            batch_sum = torch.sum(self.ct[level][beg:end].float(), dim=0)
+            self.saxs_2d += batch_sum
             if self.normalize_frame:
                 self.ct[level][beg:end] /= intt.reshape(end - beg, 1)
 
