@@ -143,22 +143,43 @@ class TimepixAnalysisDataset(XpcsDataset):
 
     def get_events(self):
         """Return (pixel, time_bin, count, bin_width_ns) for the event
-        correlator. Only single-chip (num_chips == 1) datasets are
-        supported in this version: multi-chip datasets need each module's
-        pixel index remapped through raw_dataset.layout, which is not yet
-        implemented (see docs/superpowers/specs/2026-09-17-event-correlator-
-        integration-design.md, Risks section).
+        correlator. Single-chip datasets return their pixel index as-is;
+        3-chip datasets remap each module's own pixel index into the flat
+        full-canvas index space via raw_dataset.layout -- the same
+        column-shift __getbatch__ uses to stitch the dense frame.
+
+        ACF pairs (same pixel) and CCF neighbour pairs (exactly +/-1 pixel
+        offset, see _event_core.neighbour_pairs) can never span two chips
+        for this geometry: the real inter-chip gaps are >=4 columns wide
+        and never carry events, so the cross-module clock-sync risk noted
+        in docs/superpowers/specs/2026-09-17-event-correlator-integration-
+        design.md does not apply here.
         """
-        if self.raw_dataset.num_chips != 1:
+        num_chips = self.raw_dataset.num_chips
+        if num_chips not in (1, 3):
             raise exc.DatasetError(
-                "get_events() is only supported for single-chip Timepix4 "
-                f"datasets (this dataset has {self.raw_dataset.num_chips} "
-                "chips); use --signal-spill none to run multitau/twotime "
-                "instead."
+                "get_events() only supports single-chip or 3-chip Timepix4 "
+                f"datasets (this dataset has {num_chips} chips); use "
+                "--signal-spill none to run multitau/twotime instead."
             )
-        index, frame, count = self.ifc_list[0]
-        pixel = index.detach().cpu().numpy().astype(np.int64)
-        time_bin = frame.detach().cpu().numpy().astype(np.int64)
-        count = count.detach().cpu().numpy().astype(np.int64)
+        if num_chips == 1:
+            index, frame, count = self.ifc_list[0]
+            pixel = index.detach().cpu().numpy().astype(np.int64)
+            time_bin = frame.detach().cpu().numpy().astype(np.int64)
+            count = count.detach().cpu().numpy().astype(np.int64)
+        else:
+            mod_w = self.raw_dataset.mod_size[1]
+            det_w = self.raw_dataset.det_size[1]
+            pixel_parts, time_parts, count_parts = [], [], []
+            for module_index, (index, frame, cnt) in enumerate(self.ifc_list):
+                idx = index.detach().cpu().numpy().astype(np.int64)
+                row, col = np.divmod(idx, mod_w)
+                col_offset = self.raw_dataset.layout[module_index].start
+                pixel_parts.append(row * det_w + col + col_offset)
+                time_parts.append(frame.detach().cpu().numpy().astype(np.int64))
+                count_parts.append(cnt.detach().cpu().numpy().astype(np.int64))
+            pixel = np.concatenate(pixel_parts)
+            time_bin = np.concatenate(time_parts)
+            count = np.concatenate(count_parts)
         bin_width_ns = self.bin_time_s * 1e9
         return pixel, time_bin, count, bin_width_ns
