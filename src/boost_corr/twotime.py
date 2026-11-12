@@ -47,7 +47,7 @@ class TwotimeCorrelator:
         mask_crop=None,
         device="cpu",
         method="normal",
-        dtype=torch.float32,
+        dtype=torch.bfloat16,
     ) -> None:
 
         self.dq_idx = qinfo["dq_idx"]
@@ -62,6 +62,7 @@ class TwotimeCorrelator:
         self.device = device
         self.frame_num = frame_num
         self.method = method
+        self.dtype = dtype
 
         if mask_crop is None:
             mask_crop = torch.ones(det_size, device=self.device, dtype=torch.bool)
@@ -80,7 +81,8 @@ class TwotimeCorrelator:
             self.c2_ptr = 0
             # self.cache_sum = torch.zeros((window * 2, num_q), device=device)
 
-        self.cache = torch.zeros(shape, device=device, dtype=dtype)
+        # self.cache = torch.zeros(shape, device=device, dtype=dtype)
+        self.cache = torch.zeros(shape, device=device, dtype=torch.bfloat16)
         self.cache_ptr = 0
 
         self.window = window
@@ -124,7 +126,7 @@ class TwotimeCorrelator:
                 self.process(x)
 
     def compute_average(self, num_part=10):
-        pixel_sum_par = torch.zeros(num_part, self.pixel_num, dtype=torch.float32, device=self.device)
+        pixel_sum_par = torch.zeros(num_part, self.pixel_num, dtype=self.dtype, device=self.device)
         self.pixel_sum = torch.zeros_like(pixel_sum_par[0])
 
         frame_len = self.frame_num // num_part
@@ -193,7 +195,7 @@ class TwotimeCorrelator:
             return
 
     def post_processing(self, smooth_method=None, **kwargs):
-        self.cache = self.cache.float()
+        # self.cache = self.cache.float()
         # saxs2d
         self.compute_average()
         # smooth data
@@ -216,10 +218,10 @@ class TwotimeCorrelator:
     def get_scattering(self):
         num_par = self.pixel_sum_par.shape[0]
         saxs = {
-            "saxs_2d": self.pixel_sum.reshape(-1)[self.mask_crop],
-            "saxs_2d_par": self.pixel_sum_par.reshape(num_par, -1)[:, self.mask_crop],
+            "saxs_2d": self.pixel_sum.reshape(-1)[self.mask_crop].float(),
+            "saxs_2d_par": self.pixel_sum_par.reshape(num_par, -1)[:, self.mask_crop].float(),
             "mask_crop": self.mask_crop,
-            "intensity_vs_time": self.frame_sum,
+            "intensity_vs_time": self.frame_sum.float(),
         }
         return saxs
 
@@ -241,9 +243,10 @@ class TwotimeCorrelator:
 
             matmul_prod = torch.matmul(time_series, time_series.T)
             c2 = matmul_prod * norm_factor * norm_factor.reshape(-1, 1) * time_series.shape[1]
+            c2 = c2.float()
 
             g2full = compute_diagonal_average(diag_mat_1d, c2.reshape(-1))
-            self.g2full.append(g2full)
+            self.g2full.append(g2full.float())
 
             g2partial = []
             for idx in range(num_partials):
@@ -251,7 +254,7 @@ class TwotimeCorrelator:
                 temp = compute_diagonal_average(diag_mat_1d_par, c2[sl, sl].reshape(-1))
                 g2partial.append(temp)
             g2partial = torch.stack(g2partial)
-            self.g2partial.append(g2partial)
+            self.g2partial.append(g2partial.float())
 
             yield (torch.triu(c2)).cpu().numpy()
 
