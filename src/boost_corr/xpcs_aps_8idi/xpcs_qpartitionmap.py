@@ -330,40 +330,45 @@ class XpcsQPartitionMap(object):
         """
         dqmap = self.dqmap.ravel()
         sqmap = self.sqmap.ravel()
+        num_dq, num_sq = self.dq_dim + 1, self.sq_dim + 1
+        dq_count = np.bincount(dqmap, minlength=num_dq)
+        sq_count = np.bincount(sqmap, minlength=num_sq)
 
         if dq_selection is None:
-            dq_selection = np.unique(dqmap[dqmap > 0])
-        dq_selection.sort()
+            dq_selection = np.flatnonzero(dq_count)[1:].astype(dqmap.dtype)
+        dq_selection = [dq for dq in sorted(set(dq_selection)) if 0 <= dq < num_dq]
+
+        # sort the selected pixels by (dq, sq); the stable sort keeps the
+        # pixels of a sq bin in the detector order
+        selected = np.zeros(num_dq, dtype=bool)
+        selected[dq_selection] = True
+        pixel_idx = np.flatnonzero(selected[dqmap])
+        key = dqmap[pixel_idx].astype(np.int64) * num_sq + sqmap[pixel_idx]
+        # number of pixels in each (dq, sq) pair
+        pair = np.bincount(key, minlength=num_dq * num_sq).reshape(num_dq, num_sq)
+        if num_dq * num_sq <= 2**16:
+            # numpy only has the radix sort for 16-bit integers
+            key = key.astype(np.uint16)
+        mask_idx_1d_sort = pixel_idx[np.argsort(key, kind="stable")]
 
         info = {"dq_slc": [], "sq_slc": [], "dq_idx": [], "sq_idx": [], "dq_sq_map": {}}
 
-        q_roi = []
-        dq_start = 0
+        start = 0
         for dq in dq_selection:
-            # nonzero return a tuple; (np.ndarray)
-            roi = np.nonzero(dqmap == dq)[0]
-            if np.sum(roi) == 0:
+            if dq_count[dq] == 0:
                 continue
-            sq_list = np.sort(np.unique(sqmap[roi]))
             info["dq_sq_map"][dq] = []
-
-            sq_start = dq_start
-            for sq in sq_list:
-                sq_roi = np.nonzero(sqmap == sq)[0]
-                if np.sum(sq_roi) == 0:
-                    continue
-                q_roi.append(sq_roi)
-                info["sq_slc"].append(slice(sq_start, sq_start + len(sq_roi)))
+            info["dq_idx"].append(dq)
+            info["dq_slc"].append(slice(start, start + int(dq_count[dq])))
+            for sq in np.flatnonzero(pair[dq]).astype(sqmap.dtype):
+                # a sq bin must be inside of one dq bin
+                assert pair[dq, sq] == sq_count[sq], "dqmap and sqmap must be consistent"
+                stop = start + int(sq_count[sq])
+                info["sq_slc"].append(slice(start, stop))
                 info["sq_idx"].append(sq)
                 info["dq_sq_map"][dq].append(sq)
-                sq_start += len(sq_roi)
+                start = stop
 
-            info["dq_idx"].append(dq)
-            info["dq_slc"].append(slice(dq_start, dq_start + len(roi)))
-            dq_start += len(roi)
-            assert dq_start == sq_start, "dqmap and sqmap must be consistent"
-
-        mask_idx_1d_sort = np.hstack(q_roi)
         dq_idx = info["dq_idx"]
         total_dq, dq_min, dq_max = len(dq_idx), min(dq_idx), max(dq_idx)
         logger.info(f"total dq: {total_dq}. min - max: {dq_min} - {dq_max}")

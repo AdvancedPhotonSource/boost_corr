@@ -71,6 +71,34 @@ def reference_g2(G2, dqmap, sqmap, mask):
     return g2, g2_err
 
 
+def reference_select_sort(dqmap, sqmap, dq_selection=None):
+    """the per-bin loops that select_sort replaced"""
+    dqmap, sqmap = dqmap.ravel(), sqmap.ravel()
+    if dq_selection is None:
+        dq_selection = np.unique(dqmap[dqmap > 0])
+    info = {"dq_slc": [], "sq_slc": [], "dq_idx": [], "sq_idx": [], "dq_sq_map": {}}
+    q_roi = []
+    dq_start = 0
+    for dq in sorted(dq_selection):
+        roi = np.nonzero(dqmap == dq)[0]
+        if len(roi) == 0:
+            continue
+        info["dq_sq_map"][dq] = []
+        sq_start = dq_start
+        for sq in np.sort(np.unique(sqmap[roi])):
+            sq_roi = np.nonzero(sqmap == sq)[0]
+            q_roi.append(sq_roi)
+            info["sq_slc"].append(slice(sq_start, sq_start + len(sq_roi)))
+            info["sq_idx"].append(sq)
+            info["dq_sq_map"][dq].append(sq)
+            sq_start += len(sq_roi)
+        info["dq_idx"].append(dq)
+        info["dq_slc"].append(slice(dq_start, dq_start + len(roi)))
+        dq_start += len(roi)
+        assert dq_start == sq_start, "dqmap and sqmap must be consistent"
+    return np.hstack(q_roi), info
+
+
 class QMapTestCase(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -221,6 +249,61 @@ class TestAverageWithIndexMap(QMapTestCase):
                     np.testing.assert_allclose(
                         out.cpu().numpy(), out2.cpu().numpy(), rtol=1e-6
                     )
+
+
+class TestSelectSort(QMapTestCase):
+    def check(self, dqmap, sqmap, mask, dq_selection=None):
+        qpm = XpcsQPartitionMap(self.write_qmap(dqmap, sqmap, mask))
+        selection = None if dq_selection is None else list(dq_selection)
+        ref_idx, ref_info = reference_select_sort(qpm.dqmap, qpm.sqmap, selection)
+        idx, info = qpm.select_sort(dq_selection)
+        np.testing.assert_array_equal(idx, ref_idx)
+        for key in ("dq_slc", "sq_slc", "dq_idx", "sq_idx"):
+            self.assertEqual(list(info[key]), list(ref_info[key]), key)
+        self.assertEqual(
+            {k: list(v) for k, v in info["dq_sq_map"].items()},
+            {k: list(v) for k, v in ref_info["dq_sq_map"].items()},
+        )
+        return info
+
+    def test_all_bins(self):
+        info = self.check(*make_maps())
+        # the bin labels keep the dtype of the maps; they go to the result file
+        self.assertEqual(np.asarray(info["dq_idx"]).dtype, np.int32)
+        self.assertEqual(np.asarray(info["sq_idx"]).dtype, np.int32)
+
+    def test_selection(self):
+        self.check(*make_maps(), dq_selection=[4, 2])
+        # a bin that is not in the map is skipped
+        info = self.check(*make_maps(), dq_selection=[1, 3, 99])
+        self.assertEqual(info["dq_idx"], [1, 3])
+
+    def test_missing_dq_bin(self):
+        dqmap, sqmap, mask = make_maps()
+        sqmap[dqmap == 3] = 0
+        mask[dqmap == 3] = 0
+        dqmap[dqmap == 3] = 0
+        info = self.check(dqmap, sqmap, mask)
+        self.assertEqual(list(info["dq_idx"]), [1, 2, 4, 5])
+
+    def test_more_bins_than_uint16(self):
+        self.check(*make_maps(sq_per_dq=150, num_dq=600))
+
+    def test_inconsistent_qmap(self):
+        dqmap, sqmap, mask = make_maps()
+        sqmap[sqmap == 6] = 2  # sq 2 now overlaps with dq 1 and dq 2
+        qpm = XpcsQPartitionMap(self.write_qmap(dqmap, sqmap, mask))
+        with self.assertRaises(AssertionError):
+            qpm.select_sort()
+
+    def test_sorted_qpm_feeds_twotime_layout(self):
+        dqmap, sqmap, mask = make_maps()
+        qpm = XpcsQPartitionMap(self.write_qmap(dqmap, sqmap, mask), flag_sort=True)
+        idx = qpm.info_np["mask_idx_1d"]
+        for dq, slc in zip(qpm.qinfo["dq_idx"], qpm.qinfo["dq_slc"]):
+            self.assertTrue(np.all(dqmap.ravel()[idx[slc]] == dq))
+        for sq, slc in zip(qpm.qinfo["sq_idx"], qpm.qinfo["sq_slc"]):
+            self.assertTrue(np.all(sqmap.ravel()[idx[slc]] == sq))
 
 
 if __name__ == "__main__":
